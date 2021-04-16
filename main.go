@@ -1,9 +1,9 @@
 package main
 
 import (
-	"7go/wangGoWeb/wang"
 	"log"
 	"net/http"
+	"wang"
 )
 
 func main() {
