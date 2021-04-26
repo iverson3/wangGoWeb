@@ -11,6 +11,13 @@ type router struct {
 	handlers map[string]HandlerFunc
 }
 
+// 通用的404错误处理handler
+var Err404NotFoundFunc HandlerFunc = func(c *Context) {
+	c.HTML(http.StatusNotFound, "404.html", H{
+		"path": c.Path,
+	})
+}
+
 // roots key eg, roots['GET'] roots['POST']
 // handlers key eg, handlers['GET-/p/:lang/doc'], handlers['POST-/p/book']
 
@@ -87,19 +94,24 @@ func (r *router) getRoutes(method string) []*node {
 }
 
 func (r *router) Handle(c *Context) {
+	var _handler HandlerFunc
+
 	n, params := r.getRoute(c.Method, c.Path)
 	if n == nil {
-		_, _ = c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
-		return
-	}
-
-	c.Params = params
-	//key := c.Method + "-" + c.Path
-	key := c.Method + "-" + n.pattern
-
-	if handler, ok := r.handlers[key]; ok {
-		handler(c)
+		_handler = Err404NotFoundFunc
 	} else {
-		_, _ = c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
+		c.Params = params
+		key := c.Method + "-" + n.pattern
+
+		// 将从路由中匹配得到的 Handler 添加到 c.middlewareHandlers列表中
+		// 相当于把请求的处理逻辑也当作一个中间件，且位于中间件列表的最后一个
+		if handler, ok := r.handlers[key]; ok {
+			_handler = handler
+		} else {
+			_handler = Err404NotFoundFunc
+		}
 	}
+
+	c.middlewareHandlers = append(c.middlewareHandlers, _handler)
+	c.Next()
 }

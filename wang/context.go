@@ -21,14 +21,24 @@ type Context struct {
 
 	// response info
 	StatusCode int
+
+	// middleware
+	middlewareHandlers []HandlerFunc // 中间件处理函数集合
+	index              int           // 记录当前执行到第几个中间件
+	status             bool          // 状态值，实现中间件的退出机制
+
+	// engine pointer
+	engine *Engine
 }
 
 func NewContext(w http.ResponseWriter, r *http.Request) *Context {
 	return &Context{
-		Writer:     w,
-		Req:        r,
-		Path:       r.URL.Path,
-		Method:     r.Method,
+		Writer: w,
+		Req:    r,
+		Path:   r.URL.Path,
+		Method: r.Method,
+		index:  -1,
+		status: false,
 	}
 }
 
@@ -79,10 +89,44 @@ func (c *Context) Data(code int, data []byte) (int, error) {
 	c.Status(code)
 	return c.Writer.Write(data)
 }
-func (c *Context) HTML(code int, html string) (int, error) {
+func (c *Context) HTML(code int, name string, data interface{}) {
 	//正确的调用顺序应该是Header().Set 然后WriteHeader() 最后是Write()
 	//在 WriteHeader() 后调用 Header().Set 是不会生效的
 	c.SetHeader("Content-Type", "text/html")
 	c.Status(code)
-	return c.Writer.Write([]byte(html))
+	//return c.Writer.Write([]byte(html))
+
+	if err := c.engine.htmlTemplates.ExecuteTemplate(c.Writer, name, data); err != nil {
+		c.Fail(500, err.Error())
+	}
+}
+
+
+// index是记录当前执行到第几个中间件，当在中间件中调用Next方法时，控制权交给了下一个中间件，直到调用到最后一个中间件，
+// 然后再从后往前，调用每个中间件在Next方法之后定义的部分
+func (c *Context) Next() {
+	if c.status {
+		return
+	}
+	c.index++
+	s := len(c.middlewareHandlers)
+	for ; c.index < s; c.index++ {
+		if c.status {
+			break
+		}
+		c.middlewareHandlers[c.index](c)
+	}
+}
+// 终止中间件的继续调用
+func (c *Context) Abort() {
+	c.status = true
+}
+
+func (c *Context) Fail(code int, err string) {
+	c.index = len(c.middlewareHandlers)
+	//c.JSON(code, H{"message": err})
+	c.HTML(code, "error.html", H{
+		"errCode": code,
+		"errMsg": err,
+	})
 }
